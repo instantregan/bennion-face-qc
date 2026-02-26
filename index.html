@@ -438,13 +438,16 @@ function renderCard(card) {
     </div>
   `).join('');
 
+  // Named cards: Looks Good in header, Save by text box
+  // Unnamed cards: Save + No Idea by text box
+  let headerButton = '';
   let buttonsHtml;
   if (card.isNamed) {
+    headerButton = `<button class="btn btn-approve" id="approve-${cardId}"
+        onclick="saveCard('${escAttr(cardId)}', 'approve')">Looks Good</button>`;
     buttonsHtml = `
-      <button class="btn btn-approve" id="approve-${cardId}"
-        onclick="saveCard('${escAttr(cardId)}', 'approve')">Looks Good</button>
       <button class="btn btn-card-save" id="savebtn-${cardId}"
-        onclick="saveCard('${escAttr(cardId)}', 'correction')">Save</button>
+        onclick="saveCard('${escAttr(cardId)}', 'correction')">Save Correction</button>
     `;
   } else {
     buttonsHtml = `
@@ -461,13 +464,14 @@ function renderCard(card) {
         <span class="cluster-name">${nameDisplay}</span>
         <span class="cluster-meta">&nbsp;(${faceCount} face${faceCount !== 1 ? 's' : ''}${batchLabel})</span>
       </div>
+      ${headerButton}
     </div>
     <div class="faces-grid" id="grid-${cardId}">
       ${facesHtml}
     </div>
     <div class="card-actions">
       <textarea class="correction-input" id="input-${cardId}"
-        rows="2" placeholder="${card.isNamed ? 'Corrections if needed \u2014 reference faces by #number.' : 'Who is this? Reference faces by #number. Or leave blank and hit No Idea.'}"
+        rows="2" placeholder="${card.isNamed ? 'Corrections if needed \u2014 reference faces by #number, then hit Save Correction.' : 'Who is this? Reference faces by #number. Or leave blank and hit No Idea.'}"
         oninput="autoGrow(this)"></textarea>
       ${buttonsHtml}
     </div>
