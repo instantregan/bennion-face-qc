@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bennion Face QC</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a2e; color: #eee; }
+
+  /* --- Login screen --- */
+  .login-screen {
+    display: flex; justify-content: center; align-items: center; min-height: 100vh;
+  }
+  .login-box {
+    background: #16213e; border: 1px solid #2a2a4a; border-radius: 12px;
+    padding: 40px; text-align: center; max-width: 360px; width: 90%;
+  }
+  .login-box h2 { margin-bottom: 8px; color: #e0e0ff; }
+  .login-box p { color: #888; font-size: 0.85rem; margin-bottom: 24px; }
+  .login-box input {
+    width: 100%; padding: 12px; border: 1px solid #3a3a5a; border-radius: 8px;
+    background: #1e2a4a; color: #eee; font-size: 1rem; margin-bottom: 16px;
+  }
+  .login-box input:focus { outline: none; border-color: #7eb8ff; }
+  .login-box button {
+    width: 100%; padding: 12px; background: #4a9eff; color: #fff; border: none;
+    border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer;
+  }
+  .login-box button:hover { background: #3a8eef; }
+  .login-error { color: #f66; font-size: 0.85rem; margin-bottom: 12px; display: none; }
+
+  /* --- App screen --- */
+  .app-screen { display: none; padding: 20px; }
+
+  h1 { text-align: center; margin-bottom: 8px; font-size: 1.6rem; color: #e0e0ff; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 20px; font-size: 0.9rem; }
+  .stats { text-align: center; color: #aaa; margin-bottom: 24px; font-size: 0.85rem; }
+  .stats span { color: #7eb8ff; font-weight: 600; }
+  .progress-bar { width: 100%; max-width: 600px; margin: 0 auto 24px; background: #2a2a3e; border-radius: 8px; height: 8px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #4a9eff, #7eb8ff); border-radius: 8px; transition: width 0.3s; }
+
+  .cluster-card {
+    background: #16213e; border: 1px solid #2a2a4a; border-radius: 12px;
+    padding: 20px; margin-bottom: 20px; transition: border-color 0.2s, opacity 0.3s;
+  }
+  .cluster-card.saved { border-color: #2d8a4e; background: #132a1e; }
+  .cluster-card.saving { opacity: 0.6; }
+
+  .card-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
+  }
+  .cluster-name { font-size: 1.2rem; font-weight: 700; color: #7eb8ff; }
+  .cluster-name .identified { color: #5eea8d; }
+  .cluster-meta { color: #888; font-size: 0.8rem; }
+
+  .faces-grid {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px;
+    overflow-y: auto; padding: 4px;
+  }
+  .face-thumb {
+    position: relative; width: 160px; height: 160px; border-radius: 6px;
+    overflow: hidden; border: 2px solid transparent; cursor: pointer; flex-shrink: 0;
+  }
+  .face-thumb:hover { border-color: #7eb8ff; }
+  .face-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .face-thumb .face-num {
+    position: absolute; bottom: 0; left: 0; background: rgba(0,0,0,0.75);
+    color: #fff; font-size: 0.75rem; padding: 2px 6px; border-radius: 0 6px 0 0;
+  }
+  .face-thumb .face-album {
+    position: absolute; top: 0; right: 0; background: rgba(0,0,0,0.75);
+    color: #aaa; font-size: 0.65rem; padding: 2px 4px; max-width: 120px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .face-modal {
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.9); z-index: 1000;
+    justify-content: center; align-items: center; cursor: pointer;
+  }
+  .face-modal.active { display: flex; }
+  .face-modal img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
+  .face-modal .modal-info {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.8); color: #ccc; padding: 8px 16px;
+    border-radius: 8px; font-size: 0.85rem; text-align: center;
+  }
+
+  .card-actions { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
+  .correction-input {
+    flex: 1; min-width: 250px; background: #1e2a4a; border: 1px solid #3a3a5a;
+    border-radius: 8px; color: #eee; padding: 10px 14px; font-size: 0.9rem;
+    font-family: inherit; resize: none;
+  }
+  .correction-input::placeholder { color: #555; }
+  .correction-input:focus { outline: none; border-color: #7eb8ff; }
+
+  .btn {
+    padding: 10px 20px; border: none; border-radius: 8px; font-size: 0.9rem;
+    font-weight: 600; cursor: pointer; transition: all 0.15s;
+  }
+  .btn-card-save { background: #4a9eff; color: #fff; }
+  .btn-card-save:hover { background: #3a8eef; }
+  .btn-card-save:disabled { background: #1a3a5a; color: #555; cursor: default; }
+  .btn-approve { background: #2d8a4e; color: #fff; }
+  .btn-approve:hover { background: #35a05a; }
+  .btn-approve:disabled { background: #1a4a2a; color: #555; cursor: default; }
+  .btn-noidea { background: #5a4a2a; color: #ddd; }
+  .btn-noidea:hover { background: #6a5a3a; }
+  .btn-noidea:disabled { background: #3a3a2a; color: #555; cursor: default; }
+
+  .btn-export {
+    position: fixed; bottom: 20px; right: 20px; background: #4a9eff; color: #fff;
+    padding: 14px 28px; font-size: 1rem; border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(74,158,255,0.3); z-index: 100;
+  }
+  .btn-export:hover { background: #3a8eef; }
+
+  .help {
+    max-width: 700px; margin: 0 auto 24px; background: #1e2a4a; border-radius: 10px;
+    padding: 14px 18px; font-size: 0.82rem; color: #aaa; line-height: 1.5;
+  }
+  .help strong { color: #ccc; }
+
+  .toast {
+    position: fixed; top: 20px; left: 50%;
+    transform: translateX(-50%) translateY(-80px);
+    background: #2d8a4e; color: #fff; padding: 12px 24px; border-radius: 10px;
+    font-weight: 600; z-index: 200; transition: transform 0.3s; pointer-events: none;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  .section-header {
+    font-size: 1.3rem; font-weight: 700; color: #e0e0ff; margin: 32px 0 16px;
+    padding-bottom: 8px; border-bottom: 1px solid #2a2a4a;
+  }
+  .section-header .count { color: #7eb8ff; font-weight: 400; font-size: 1rem; }
+  .section-toggle {
+    background: none; border: none; color: #7eb8ff; cursor: pointer;
+    font-size: 0.85rem; margin-left: 12px;
+  }
+  .section-toggle:hover { text-decoration: underline; }
+
+  .empty-state { text-align: center; color: #888; padding: 40px; font-size: 1rem; }
+</style>
+</head>
+<body>
+
+<!-- Login Screen -->
+<div class="login-screen" id="login-screen">
+  <div class="login-box">
+    <h2>Bennion Face QC</h2>
+    <p>SHB's favorite snack?</p>
+    <div class="login-error" id="login-error">Nope, try again.</div>
+    <input type="password" id="login-pw" placeholder="Password" autofocus
+      onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">Enter</button>
+  </div>
+</div>
+
+<!-- App Screen -->
+<div class="app-screen" id="app-screen">
+  <h1>Bennion Family Face QC</h1>
+  <p class="subtitle">Review Regan's face identifications &mdash; confirm, correct, or identify unknowns</p>
+  <div class="stats">
+    <span id="stat-total">0</span> total cards &middot;
+    <span id="stat-remaining">0</span> remaining &middot;
+    <span id="stat-saved">0</span> saved
+  </div>
+  <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+
+  <div class="help">
+    <strong>How to use:</strong> Each card shows faces believed to be the same person.
+    Click any face to enlarge. <strong>Green cards</strong> are Regan's identifications &mdash;
+    hit <strong>Looks Good</strong> to confirm, or type a correction.
+    <strong>Pink cards</strong> are unidentified &mdash; type who you think they are (reference faces by <strong>#number</strong>),
+    or hit <strong>No Idea</strong> to skip.
+    Click <strong>Save</strong> on each card. Saved cards won't appear next time.
+  </div>
+
+  <div id="clusters-container"></div>
+
+  <div class="face-modal" id="face-modal">
+    <img id="modal-img" src="">
+    <div class="modal-info" id="modal-info"></div>
+  </div>
+
+  <button class="btn btn-export" id="btn-export" onclick="exportAll()">Export All</button>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+// --- Auth ---
+// SHA-256 hash of "grapefruit"
+const PW_HASH = 'e30970665ed2e34594c2645ba9d3c307b36fc95efb92136b18ebdeee48b9072b';
+const STORAGE_KEY = 'bennion_qc_auth';
+const PROGRESS_KEY = 'bennion_qc_progress';
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function doLogin() {
+  const pw = document.getElementById('login-pw').value;
+  const hash = await sha256(pw);
+  if (hash === PW_HASH) {
+    localStorage.setItem(STORAGE_KEY, 'yes');
+    showApp();
+  } else {
+    document.getElementById('login-error').style.display = 'block';
+    document.getElementById('login-pw').value = '';
+    document.getElementById('login-pw').focus();
+  }
+}
+
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  init();
+}
+
+// Check auth on load
+if (localStorage.getItem(STORAGE_KEY) === 'yes') {
+  showApp();
+}
+
+// --- App ---
+let qcData = null;
+let savedProgress = {};
+let allCards = [];
+const BATCH_SIZE = 40;
+
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(PROGRESS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveProgressToStorage() {
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify(savedProgress));
+}
+
+async function init() {
+  try {
+    const resp = await fetch('qc_data.json');
+    qcData = await resp.json();
+  } catch (e) {
+    document.getElementById('clusters-container').innerHTML =
+      '<p style="text-align:center;color:#f66">Failed to load data.</p>';
+    return;
+  }
+
+  savedProgress = loadProgress();
+
+  const named = qcData.groups.filter(g => g.identified_name);
+  const unnamed = qcData.groups.filter(g => !g.identified_name);
+
+  allCards = [];
+
+  for (const group of named) {
+    allCards.push({ ...group, batchIndex: null, totalBatches: null, cardId: group.cluster_id, isNamed: true });
+  }
+
+  for (const group of unnamed) {
+    if (group.faces.length <= BATCH_SIZE) {
+      allCards.push({ ...group, batchIndex: null, totalBatches: null, cardId: group.cluster_id, isNamed: false });
+    } else {
+      const totalBatches = Math.ceil(group.faces.length / BATCH_SIZE);
+      for (let i = 0; i < totalBatches; i++) {
+        const batchFaces = group.faces.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
+        allCards.push({
+          cluster_id: group.cluster_id,
+          identified_name: null,
+          count: group.count,
+          albums: group.albums,
+          faces: batchFaces,
+          batchIndex: i,
+          totalBatches: totalBatches,
+          cardId: `${group.cluster_id}__batch${i}`,
+          isNamed: false
+        });
+      }
+    }
+  }
+
+  render();
+}
+
+function render() {
+  const container = document.getElementById('clusters-container');
+  container.innerHTML = '';
+
+  const namedCards = allCards.filter(c => c.isNamed && !savedProgress[c.cardId]);
+  const unnamedCards = allCards.filter(c => !c.isNamed && !savedProgress[c.cardId]);
+  const totalCards = allCards.length;
+  const savedCount = Object.keys(savedProgress).length;
+  const remainingCount = namedCards.length + unnamedCards.length;
+
+  document.getElementById('stat-total').textContent = totalCards;
+  document.getElementById('stat-remaining').textContent = remainingCount;
+  document.getElementById('stat-saved').textContent = savedCount;
+  const pct = totalCards > 0 ? (savedCount / totalCards * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+
+  if (remainingCount === 0) {
+    container.innerHTML = '<div class="empty-state">All done! Every card has been reviewed. Click Export All to download corrections.</div>';
+    return;
+  }
+
+  if (namedCards.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'section-header';
+    header.id = 'named-section-header';
+    header.innerHTML = `Verify Identifications <span class="count">(${namedCards.length} remaining)</span>` +
+      `<button class="section-toggle" id="named-toggle" onclick="toggleSection('named')">Hide</button>`;
+    container.appendChild(header);
+
+    const wrapper = document.createElement('div');
+    wrapper.id = 'named-section';
+    for (const card of namedCards) wrapper.appendChild(renderCard(card));
+    container.appendChild(wrapper);
+  }
+
+  if (unnamedCards.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'section-header';
+    header.id = 'unnamed-section-header';
+    header.innerHTML = `Unidentified <span class="count">(${unnamedCards.length} cards)</span>` +
+      `<button class="section-toggle" id="unnamed-toggle" onclick="toggleSection('unnamed')">Hide</button>`;
+    container.appendChild(header);
+
+    const wrapper = document.createElement('div');
+    wrapper.id = 'unnamed-section';
+    for (const card of unnamedCards) wrapper.appendChild(renderCard(card));
+    container.appendChild(wrapper);
+  }
+}
+
+function toggleSection(section) {
+  const el = document.getElementById(section + '-section');
+  const btn = document.getElementById(section + '-toggle');
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+    btn.textContent = 'Hide';
+  } else {
+    el.style.display = 'none';
+    btn.textContent = 'Show';
+  }
+}
+
+function renderCard(card) {
+  const cardId = card.cardId;
+  const el = document.createElement('div');
+  el.className = 'cluster-card';
+  el.id = `card-${cardId}`;
+
+  const saved = savedProgress[cardId];
+  if (saved) el.classList.add('saved');
+
+  let nameDisplay;
+  if (card.identified_name) {
+    nameDisplay = `<span class="identified">${esc(card.identified_name)}</span>`;
+  } else {
+    nameDisplay = '<span style="color:#f8a">Unidentified</span>';
+  }
+
+  let batchLabel = '';
+  if (card.totalBatches !== null) {
+    batchLabel = ` \u2014 batch ${card.batchIndex + 1} of ${card.totalBatches}`;
+  }
+
+  const faceCount = card.faces.length;
+  const facesHtml = card.faces.map(f => `
+    <div class="face-thumb" onclick="showModal('${escAttr(f.crop)}', '#${f.num} \u2014 ${esc(f.album)}', '${escAttr(f.source)}')">
+      <img src="faces/${escAttr(f.crop)}" loading="lazy" alt="Face #${f.num}">
+      <span class="face-num">#${f.num}</span>
+      <span class="face-album">${esc(f.album.replace(/-/g,' ').substring(0,15))}</span>
+    </div>
+  `).join('');
+
+  const existingText = saved && saved.text ? saved.text : '';
+  const alreadySaved = !!saved;
+
+  let buttonsHtml;
+  if (card.isNamed) {
+    buttonsHtml = `
+      <button class="btn btn-approve" id="approve-${cardId}"
+        onclick="saveCard('${escAttr(cardId)}', true)"
+        ${alreadySaved ? 'disabled' : ''}>
+        ${alreadySaved ? 'Confirmed' : 'Looks Good'}
+      </button>
+      <button class="btn btn-card-save" id="savebtn-${cardId}"
+        onclick="saveCard('${escAttr(cardId)}', false)"
+        ${alreadySaved ? 'disabled' : ''}>
+        ${alreadySaved ? 'Saved' : 'Save'}
+      </button>
+    `;
+  } else {
+    buttonsHtml = `
+      <button class="btn btn-card-save" id="savebtn-${cardId}"
+        onclick="saveCard('${escAttr(cardId)}', false)"
+        ${alreadySaved ? 'disabled' : ''}>
+        ${alreadySaved ? 'Saved' : 'Save'}
+      </button>
+      <button class="btn btn-noidea" id="noidea-${cardId}"
+        onclick="saveCard('${escAttr(cardId)}', false, true)"
+        ${alreadySaved ? 'disabled' : ''}>
+        ${saved && saved.skipped ? 'Skipped' : 'No Idea'}
+      </button>
+    `;
+  }
+
+  el.innerHTML = `
+    <div class="card-header">
+      <div>
+        <span class="cluster-name">${nameDisplay}</span>
+        <span class="cluster-meta">&nbsp;(${faceCount} face${faceCount !== 1 ? 's' : ''}${batchLabel})</span>
+      </div>
+    </div>
+    <div class="faces-grid" id="grid-${cardId}">
+      ${facesHtml}
+    </div>
+    <div class="card-actions">
+      <textarea class="correction-input" id="input-${cardId}"
+        rows="2" placeholder="${card.isNamed ? 'Corrections if needed \u2014 reference faces by #number.' : 'Who is this? Reference faces by #number. Or leave blank and hit No Idea.'}"
+        oninput="autoGrow(this)">${esc(existingText)}</textarea>
+      ${buttonsHtml}
+    </div>
+  `;
+
+  return el;
+}
+
+function saveCard(cardId, isApprove, noIdea) {
+  const input = document.getElementById(`input-${cardId}`);
+  const text = input ? input.value.trim() : '';
+  const skipped = noIdea || (!text && !isApprove);
+
+  const card = document.getElementById(`card-${cardId}`);
+  card.classList.add('saving');
+
+  savedProgress[cardId] = {
+    text: text || null,
+    skipped: skipped,
+    approved: isApprove || false,
+    timestamp: new Date().toISOString()
+  };
+  saveProgressToStorage();
+
+  card.classList.remove('saving');
+  card.classList.add('saved');
+
+  const saveBtn = document.getElementById(`savebtn-${cardId}`);
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saved'; }
+  const approveBtn = document.getElementById(`approve-${cardId}`);
+  if (approveBtn) { approveBtn.disabled = true; approveBtn.textContent = 'Confirmed'; }
+  const noIdeaBtn = document.getElementById(`noidea-${cardId}`);
+  if (noIdeaBtn) { noIdeaBtn.disabled = true; noIdeaBtn.textContent = 'Skipped'; }
+
+  showToast(noIdea ? 'No idea \u2014 skipped' : (isApprove ? 'Confirmed!' : 'Saved!'));
+
+  card.style.transition = 'opacity 0.5s, max-height 0.5s, margin 0.5s, padding 0.5s';
+  card.style.opacity = '0';
+  card.style.overflow = 'hidden';
+  setTimeout(() => {
+    card.style.maxHeight = '0';
+    card.style.margin = '0';
+    card.style.padding = '0';
+    setTimeout(() => {
+      card.remove();
+      updateStats();
+    }, 500);
+  }, 300);
+}
+
+function updateStats() {
+  const totalCards = allCards.length;
+  const savedCount = Object.keys(savedProgress).length;
+  const namedRemaining = allCards.filter(c => c.isNamed && !savedProgress[c.cardId]).length;
+  const unnamedRemaining = allCards.filter(c => !c.isNamed && !savedProgress[c.cardId]).length;
+  const remainingCount = namedRemaining + unnamedRemaining;
+
+  document.getElementById('stat-total').textContent = totalCards;
+  document.getElementById('stat-remaining').textContent = remainingCount;
+  document.getElementById('stat-saved').textContent = savedCount;
+  const pct = totalCards > 0 ? (savedCount / totalCards * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+
+  const namedHeader = document.getElementById('named-section-header');
+  if (namedHeader) namedHeader.querySelector('.count').textContent = `(${namedRemaining} remaining)`;
+  const unnamedHeader = document.getElementById('unnamed-section-header');
+  if (unnamedHeader) unnamedHeader.querySelector('.count').textContent = `(${unnamedRemaining} cards)`;
+
+  if (remainingCount === 0) {
+    document.getElementById('clusters-container').innerHTML =
+      '<div class="empty-state">All done! Every card has been reviewed. Click Export All to download corrections.</div>';
+  }
+}
+
+function showModal(crop, info, source) {
+  const modal = document.getElementById('face-modal');
+  document.getElementById('modal-img').src = 'faces/' + crop;
+  document.getElementById('modal-info').innerHTML = info + '<br><span style="font-size:0.75rem;color:#888">' + source + '</span>';
+  modal.classList.add('active');
+}
+
+document.getElementById('face-modal').addEventListener('click', () => {
+  document.getElementById('face-modal').classList.remove('active');
+});
+
+function autoGrow(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+function exportAll() {
+  const merged = {};
+  for (const [cardId, corr] of Object.entries(savedProgress)) {
+    const batchMatch = cardId.match(/^(.+)__batch(\d+)$/);
+    if (batchMatch) {
+      const clusterId = batchMatch[1];
+      const batchNum = parseInt(batchMatch[2]);
+      if (!merged[clusterId]) merged[clusterId] = { approved: false, texts: [] };
+      if (corr.text) merged[clusterId].texts.push({ batch: batchNum + 1, text: corr.text });
+    } else {
+      merged[cardId] = { approved: !!corr.approved, text: corr.text || null };
+    }
+  }
+
+  for (const [k, v] of Object.entries(merged)) {
+    if (v.texts) {
+      merged[k].text = v.texts.length > 0
+        ? v.texts.map(t => `[batch ${t.batch}] ${t.text}`).join('\n')
+        : null;
+      delete merged[k].texts;
+    }
+  }
+
+  const output = {
+    timestamp: new Date().toISOString(),
+    total_groups: allCards.length,
+    saved_count: Object.keys(savedProgress).length,
+    corrections: merged
+  };
+
+  const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'qc_corrections_julie.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Exported!');
+}
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+function escAttr(s) {
+  return (s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>
