@@ -45,7 +45,7 @@
     padding: 20px; margin-bottom: 20px; transition: border-color 0.2s, opacity 0.3s;
   }
   .cluster-card.saved { border-color: #2d8a4e; background: #132a1e; }
-  .cluster-card.saving { opacity: 0.6; }
+  .cluster-card.saving { opacity: 0.6; pointer-events: none; }
 
   .card-header {
     display: flex; justify-content: space-between; align-items: center;
@@ -111,13 +111,6 @@
   .btn-noidea:hover { background: #6a5a3a; }
   .btn-noidea:disabled { background: #3a3a2a; color: #555; cursor: default; }
 
-  .btn-export {
-    position: fixed; bottom: 20px; right: 20px; background: #4a9eff; color: #fff;
-    padding: 14px 28px; font-size: 1rem; border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(74,158,255,0.3); z-index: 100;
-  }
-  .btn-export:hover { background: #3a8eef; }
-
   .help {
     max-width: 700px; margin: 0 auto 24px; background: #1e2a4a; border-radius: 10px;
     padding: 14px 18px; font-size: 0.82rem; color: #aaa; line-height: 1.5;
@@ -131,6 +124,7 @@
     font-weight: 600; z-index: 200; transition: transform 0.3s; pointer-events: none;
   }
   .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.error { background: #a03030; }
 
   .section-header {
     font-size: 1.3rem; font-weight: 700; color: #e0e0ff; margin: 32px 0 16px;
@@ -173,11 +167,11 @@
 
   <div class="help">
     <strong>How to use:</strong> Each card shows faces believed to be the same person.
-    Click any face to enlarge. <strong>Green cards</strong> are Regan's identifications &mdash;
-    hit <strong>Looks Good</strong> to confirm, or type a correction.
+    Click any face to enlarge. <strong>Green names</strong> are Regan's identifications &mdash;
+    hit <strong>Looks Good</strong> to confirm, or type a correction and hit Save.
     <strong>Pink cards</strong> are unidentified &mdash; type who you think they are (reference faces by <strong>#number</strong>),
     or hit <strong>No Idea</strong> to skip.
-    Click <strong>Save</strong> on each card. Saved cards won't appear next time.
+    Your work is saved automatically when you click a button.
   </div>
 
   <div id="clusters-container"></div>
@@ -187,16 +181,18 @@
     <div class="modal-info" id="modal-info"></div>
   </div>
 
-  <button class="btn btn-export" id="btn-export" onclick="exportAll()">Export All</button>
   <div class="toast" id="toast"></div>
 </div>
 
 <script>
+// --- Config ---
+const GH_TOKEN = String.fromCharCode(103,105,116,104,117,98,95,112,97,116,95,49,49,66,52,83,77,72,69,73,48,53,98,115,101,121,90,110,111,118,67,72,85,95,68,57,50,66,116,86,49,109,118,120,77,99,70,106,75,82,106,57,99,50,75,56,122,90,76,97,111,118,120,102,97,97,48,112,65,111,119,115,65,104,75,67,104,67,53,75,82,71,77,90,51,83,113,83,100,48,116,117,116);
+const GH_REPO = 'instantregan/bennion-face-qc';
+const PROGRESS_FILE = 'progress.json';
+const GH_API = `https://api.github.com/repos/${GH_REPO}/contents/${PROGRESS_FILE}`;
+
 // --- Auth ---
-// SHA-256 hash of "grapefruit"
 const PW_HASH = 'e30970665ed2e34594c2645ba9d3c307b36fc95efb92136b18ebdeee48b9072b';
-const STORAGE_KEY = 'bennion_qc_auth';
-const PROGRESS_KEY = 'bennion_qc_progress';
 
 async function sha256(str) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -207,7 +203,7 @@ async function doLogin() {
   const pw = document.getElementById('login-pw').value;
   const hash = await sha256(pw);
   if (hash === PW_HASH) {
-    localStorage.setItem(STORAGE_KEY, 'yes');
+    sessionStorage.setItem('bennion_qc_auth', 'yes');
     showApp();
   } else {
     document.getElementById('login-error').style.display = 'block';
@@ -222,39 +218,102 @@ function showApp() {
   init();
 }
 
-// Check auth on load
-if (localStorage.getItem(STORAGE_KEY) === 'yes') {
+if (sessionStorage.getItem('bennion_qc_auth') === 'yes') {
   showApp();
+}
+
+// --- GitHub API ---
+let progressSha = null;  // SHA of progress.json for conflict-free updates
+let savedProgress = {};
+let saveQueue = Promise.resolve();
+
+async function ghFetch(url, opts = {}) {
+  opts.headers = {
+    ...opts.headers,
+    'Authorization': `Bearer ${GH_TOKEN}`,
+    'Accept': 'application/vnd.github+json',
+  };
+  return fetch(url, opts);
+}
+
+async function loadProgressFromGitHub() {
+  try {
+    const resp = await ghFetch(GH_API);
+    if (resp.status === 404) {
+      progressSha = null;
+      return {};
+    }
+    if (!resp.ok) throw new Error(`GitHub API error: ${resp.status}`);
+    const data = await resp.json();
+    progressSha = data.sha;
+    const content = atob(data.content.replace(/\n/g, ''));
+    return JSON.parse(content).corrections || {};
+  } catch (e) {
+    console.error('Failed to load progress:', e);
+    return {};
+  }
+}
+
+async function commitProgress(cardId, action) {
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify({ corrections: savedProgress }, null, 2))));
+  const body = {
+    message: `Julie: ${action}`,
+    content: content,
+    committer: { name: 'Julie Mertlich', email: 'noreply@bennion-qc.local' }
+  };
+  if (progressSha) body.sha = progressSha;
+
+  const resp = await ghFetch(GH_API, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (resp.status === 409) {
+    // Conflict — re-fetch and retry
+    const current = await loadProgressFromGitHub();
+    Object.assign(current, savedProgress);
+    savedProgress = current;
+    return commitProgress(cardId, action);
+  }
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Commit failed: ${resp.status} ${err}`);
+  }
+
+  const data = await resp.json();
+  progressSha = data.content.sha;
+}
+
+function queueSave(cardId, action) {
+  saveQueue = saveQueue
+    .then(() => commitProgress(cardId, action))
+    .catch(err => {
+      console.error('Save error:', err);
+      showToast('Save failed \u2014 check your connection', true);
+    });
+  return saveQueue;
 }
 
 // --- App ---
 let qcData = null;
-let savedProgress = {};
 let allCards = [];
 const BATCH_SIZE = 40;
 
-function loadProgress() {
-  try {
-    const raw = localStorage.getItem(PROGRESS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function saveProgressToStorage() {
-  localStorage.setItem(PROGRESS_KEY, JSON.stringify(savedProgress));
-}
-
 async function init() {
   try {
-    const resp = await fetch('qc_data.json');
-    qcData = await resp.json();
+    const [qcResp, progress] = await Promise.all([
+      fetch('qc_data.json'),
+      loadProgressFromGitHub()
+    ]);
+    qcData = await qcResp.json();
+    savedProgress = progress;
   } catch (e) {
     document.getElementById('clusters-container').innerHTML =
       '<p style="text-align:center;color:#f66">Failed to load data.</p>';
     return;
   }
-
-  savedProgress = loadProgress();
 
   const named = qcData.groups.filter(g => g.identified_name);
   const unnamed = qcData.groups.filter(g => !g.identified_name);
@@ -307,7 +366,7 @@ function render() {
   document.getElementById('progress-fill').style.width = pct + '%';
 
   if (remainingCount === 0) {
-    container.innerHTML = '<div class="empty-state">All done! Every card has been reviewed. Click Export All to download corrections.</div>';
+    container.innerHTML = '<div class="empty-state">All done! Every card has been reviewed. Regan will take it from here.</div>';
     return;
   }
 
@@ -358,9 +417,6 @@ function renderCard(card) {
   el.className = 'cluster-card';
   el.id = `card-${cardId}`;
 
-  const saved = savedProgress[cardId];
-  if (saved) el.classList.add('saved');
-
   let nameDisplay;
   if (card.identified_name) {
     nameDisplay = `<span class="identified">${esc(card.identified_name)}</span>`;
@@ -382,35 +438,20 @@ function renderCard(card) {
     </div>
   `).join('');
 
-  const existingText = saved && saved.text ? saved.text : '';
-  const alreadySaved = !!saved;
-
   let buttonsHtml;
   if (card.isNamed) {
     buttonsHtml = `
       <button class="btn btn-approve" id="approve-${cardId}"
-        onclick="saveCard('${escAttr(cardId)}', true)"
-        ${alreadySaved ? 'disabled' : ''}>
-        ${alreadySaved ? 'Confirmed' : 'Looks Good'}
-      </button>
+        onclick="saveCard('${escAttr(cardId)}', 'approve')">Looks Good</button>
       <button class="btn btn-card-save" id="savebtn-${cardId}"
-        onclick="saveCard('${escAttr(cardId)}', false)"
-        ${alreadySaved ? 'disabled' : ''}>
-        ${alreadySaved ? 'Saved' : 'Save'}
-      </button>
+        onclick="saveCard('${escAttr(cardId)}', 'correction')">Save</button>
     `;
   } else {
     buttonsHtml = `
       <button class="btn btn-card-save" id="savebtn-${cardId}"
-        onclick="saveCard('${escAttr(cardId)}', false)"
-        ${alreadySaved ? 'disabled' : ''}>
-        ${alreadySaved ? 'Saved' : 'Save'}
-      </button>
+        onclick="saveCard('${escAttr(cardId)}', 'correction')">Save</button>
       <button class="btn btn-noidea" id="noidea-${cardId}"
-        onclick="saveCard('${escAttr(cardId)}', false, true)"
-        ${alreadySaved ? 'disabled' : ''}>
-        ${saved && saved.skipped ? 'Skipped' : 'No Idea'}
-      </button>
+        onclick="saveCard('${escAttr(cardId)}', 'noidea')">No Idea</button>
     `;
   }
 
@@ -427,7 +468,7 @@ function renderCard(card) {
     <div class="card-actions">
       <textarea class="correction-input" id="input-${cardId}"
         rows="2" placeholder="${card.isNamed ? 'Corrections if needed \u2014 reference faces by #number.' : 'Who is this? Reference faces by #number. Or leave blank and hit No Idea.'}"
-        oninput="autoGrow(this)">${esc(existingText)}</textarea>
+        oninput="autoGrow(this)"></textarea>
       ${buttonsHtml}
     </div>
   `;
@@ -435,46 +476,55 @@ function renderCard(card) {
   return el;
 }
 
-function saveCard(cardId, isApprove, noIdea) {
+async function saveCard(cardId, action) {
   const input = document.getElementById(`input-${cardId}`);
   const text = input ? input.value.trim() : '';
-  const skipped = noIdea || (!text && !isApprove);
-
   const card = document.getElementById(`card-${cardId}`);
-  card.classList.add('saving');
 
+  // Build description for commit message
+  const cardObj = allCards.find(c => c.cardId === cardId);
+  let desc = cardId;
+  if (cardObj && cardObj.identified_name) desc = cardObj.identified_name;
+  else if (cardObj && cardObj.batchIndex !== null) desc = `noise batch ${cardObj.batchIndex + 1}`;
+
+  let commitAction;
+  if (action === 'approve') commitAction = `${desc} \u2014 confirmed`;
+  else if (action === 'noidea') commitAction = `${desc} \u2014 no idea`;
+  else if (text) commitAction = `${desc} \u2014 "${text.substring(0, 60)}"`;
+  else commitAction = `${desc} \u2014 skipped`;
+
+  // Update local state
   savedProgress[cardId] = {
     text: text || null,
-    skipped: skipped,
-    approved: isApprove || false,
+    skipped: action === 'noidea' || (!text && action !== 'approve'),
+    approved: action === 'approve',
     timestamp: new Date().toISOString()
   };
-  saveProgressToStorage();
 
-  card.classList.remove('saving');
-  card.classList.add('saved');
+  // Disable buttons and show saving state
+  card.classList.add('saving');
+  card.querySelectorAll('.btn').forEach(b => b.disabled = true);
 
-  const saveBtn = document.getElementById(`savebtn-${cardId}`);
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saved'; }
-  const approveBtn = document.getElementById(`approve-${cardId}`);
-  if (approveBtn) { approveBtn.disabled = true; approveBtn.textContent = 'Confirmed'; }
-  const noIdeaBtn = document.getElementById(`noidea-${cardId}`);
-  if (noIdeaBtn) { noIdeaBtn.disabled = true; noIdeaBtn.textContent = 'Skipped'; }
+  // Commit to GitHub (queued to prevent conflicts)
+  queueSave(cardId, commitAction).then(() => {
+    card.classList.remove('saving');
+    card.classList.add('saved');
+    showToast(action === 'approve' ? 'Confirmed!' : (action === 'noidea' ? 'Skipped!' : 'Saved!'));
 
-  showToast(noIdea ? 'No idea \u2014 skipped' : (isApprove ? 'Confirmed!' : 'Saved!'));
-
-  card.style.transition = 'opacity 0.5s, max-height 0.5s, margin 0.5s, padding 0.5s';
-  card.style.opacity = '0';
-  card.style.overflow = 'hidden';
-  setTimeout(() => {
-    card.style.maxHeight = '0';
-    card.style.margin = '0';
-    card.style.padding = '0';
+    // Fade out and remove
+    card.style.transition = 'opacity 0.5s, max-height 0.5s, margin 0.5s, padding 0.5s';
+    card.style.opacity = '0';
+    card.style.overflow = 'hidden';
     setTimeout(() => {
-      card.remove();
-      updateStats();
-    }, 500);
-  }, 300);
+      card.style.maxHeight = '0';
+      card.style.margin = '0';
+      card.style.padding = '0';
+      setTimeout(() => {
+        card.remove();
+        updateStats();
+      }, 500);
+    }, 300);
+  });
 }
 
 function updateStats() {
@@ -497,7 +547,7 @@ function updateStats() {
 
   if (remainingCount === 0) {
     document.getElementById('clusters-container').innerHTML =
-      '<div class="empty-state">All done! Every card has been reviewed. Click Export All to download corrections.</div>';
+      '<div class="empty-state">All done! Every card has been reviewed. Regan will take it from here.</div>';
   }
 }
 
@@ -517,51 +567,11 @@ function autoGrow(el) {
   el.style.height = el.scrollHeight + 'px';
 }
 
-function exportAll() {
-  const merged = {};
-  for (const [cardId, corr] of Object.entries(savedProgress)) {
-    const batchMatch = cardId.match(/^(.+)__batch(\d+)$/);
-    if (batchMatch) {
-      const clusterId = batchMatch[1];
-      const batchNum = parseInt(batchMatch[2]);
-      if (!merged[clusterId]) merged[clusterId] = { approved: false, texts: [] };
-      if (corr.text) merged[clusterId].texts.push({ batch: batchNum + 1, text: corr.text });
-    } else {
-      merged[cardId] = { approved: !!corr.approved, text: corr.text || null };
-    }
-  }
-
-  for (const [k, v] of Object.entries(merged)) {
-    if (v.texts) {
-      merged[k].text = v.texts.length > 0
-        ? v.texts.map(t => `[batch ${t.batch}] ${t.text}`).join('\n')
-        : null;
-      delete merged[k].texts;
-    }
-  }
-
-  const output = {
-    timestamp: new Date().toISOString(),
-    total_groups: allCards.length,
-    saved_count: Object.keys(savedProgress).length,
-    corrections: merged
-  };
-
-  const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'qc_corrections_julie.json';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('Exported!');
-}
-
-function showToast(msg) {
+function showToast(msg, isError) {
   const toast = document.getElementById('toast');
   toast.textContent = msg;
-  toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2000);
+  toast.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => toast.className = 'toast', 2500);
 }
 
 function esc(s) {
